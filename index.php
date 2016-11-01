@@ -41,7 +41,8 @@ $config = array(
 	'group_by' => REDCap::isLongitudinal() ? 'event' : 'form',	//form or event
 	'vertical_header' => 0,	// default to horizontal	
 	'excluded_forms' => '',
-	'excluded_events' => ''
+	'excluded_events' => '',
+    'order_by' => ''
 );
 
 // Load the query string and script URI
@@ -58,6 +59,11 @@ $settings = isset($qs_params['settings']) ? json_decode(urldecode($qs_params['se
 $debug['settings'] = $settings;
 if (!empty($settings)) $config = array_merge($config,$settings);
 $debug['config_after_settings'] = $config;
+
+// Get User Rights
+global $user_rights;
+$user_rights = REDCap::getUserRights(USERID);
+$user_rights = $user_rights[USERID];
 
 // Determien whether or not the current user can 'edit' the custom dashboard (requires reports rights)
 $config['can_edit'] = (SUPER_USER || $user_rights['reports']);
@@ -241,7 +247,7 @@ class customDashboard {
 	
 	// Generate the code to edit the filter
 	public static function getConfigBox($config) {
-		global $Proj, $debug, $user_rights;
+		global $Proj, $debug, $user_rights, $record_label;
 		
 		$filter_logic = $config['filter'];
 		
@@ -358,6 +364,16 @@ class customDashboard {
 						)
 					)
 				).
+                RCView::tr(array(),
+                    RCView::td(array('class'=>'td1'), "Order By (in development)").
+                    RCView::td(array('class'=>'td2'),
+                        RCView::select(array(
+                            'id'=>'order_by','class'=>'x-form-text x-form-field',
+                            'onchange'=>"refreshDashboard();"),
+                            array('0'=>'Record ID Asc (default)','1'=>'Record ID Desc'), $config['order_by']
+                        )
+                    )
+                ).
 				RCView::tr(array(),
 					RCView::td(array('class'=>'td1'), "").
 					RCView::td(array('class'=>'td2'),
@@ -824,7 +840,7 @@ $debug['getPageNumAndSlice'] = "NumRecords: $num_records";
 	
 	// New method for making the actual table
 	public static function getTable($config) {
-		global $Proj, $DDP, $project_id, $table_pk_label, $lang, $surveys_enabled, $debug;
+		global $Proj, $user_rights, $DDP, $project_id, $table_pk_label, $lang, $surveys_enabled, $debug, $realtime_webservice_offset_days, $realtime_webservice_offset_plusminus;
 		$last_lap_ts = microtime(true);
 		
 		// Get all records (filtering for arm if set)
@@ -836,7 +852,15 @@ $debug['getPageNumAndSlice'] = "NumRecords: $num_records";
 			// TBD? Test Filter
 			$recordNames = self::filterRecords($recordNames, $config['filter']);
 		}
-		
+
+		// Sort Records
+        //if (USERID == 'andy123') print "<pre>".print_r($config,true)."</pre>";
+        if ($config['order_by'] == 1) {
+            arsort($recordNames,SORT_NUMERIC);
+            $recordNames = array_values($recordNames);
+            //if (USERID == 'andy123') print "<pre>".print_r($recordNames,true)."</pre>";
+        }
+
 		// Get the page dropdown header and sliced records
 		list($pageNumDropdown, $recordNamesThisPage) = self::getPageNumAndSlice($recordNames, $config);
 		
@@ -925,7 +949,7 @@ $debug['filter_formsEvents'] = "Calculating formsEvents took in $lap_duration se
 			// For each record (i.e. row), loop through all forms/events
 			$this_row = RCView::td(array('class'=>'data','style'=>'font-size:12px;padding:0 10px;'), 
 							// For longitudinal, create record name as link to event grid page
-							($longitudinal 
+							(REDCap::isLongitudinal()
 								? RCView::a(array('href'=>APP_PATH_WEBROOT . "DataEntry/grid.php?pid=$project_id&arm=".$config['arm']."&id=".removeDDEending($this_record), 'style'=>'text-decoration:underline;'), removeDDEending($this_record))
 								: removeDDEending($this_record)
 							) .
@@ -985,20 +1009,20 @@ $debug['filter_formsEvents'] = "Calculating formsEvents took in $lap_duration se
 				// If it's a survey response, display different icons
 				if (isset($surveyResponses[$this_record][$attr['event_id']][$attr['form_name']])) {			
 					//Determine color of button based on response status
-					switch ($surveyResponses[$this_record][$attr['event_id']][$attr['form_name']]) {
+					switch ($surveyResponses[$this_record][$attr['event_id']][$attr['form_name']][1]) {
 						case '2':
-							$img = 'tick_circle_frame.png';
+							$img = 'circle_green_tick.png';
 							break;
 						default:
 							$img = 'circle_orange_tick.png';
 					}
 				} else {	
 					// Set image HTML
-					if ($rec_attr[$attr['event_id']][$attr['form_name']] == '2') {
+					if ($rec_attr[$attr['event_id']][$attr['form_name']][1] == '2') {
 						$img = 'circle_green.png';
-					} elseif ($rec_attr[$attr['event_id']][$attr['form_name']] == '1') {
+					} elseif ($rec_attr[$attr['event_id']][$attr['form_name']][1] == '1') {
 						$img = 'circle_yellow.png';
-					} elseif ($rec_attr[$attr['event_id']][$attr['form_name']] == '0') {
+					} elseif ($rec_attr[$attr['event_id']][$attr['form_name']][1] == '0') {
 						$img = 'circle_red.gif';
 					} else {
 						$img = 'circle_gray.png';
@@ -1199,7 +1223,7 @@ $debug['step4'] = "Before return formsEvents took in $lap_duration seconds.";
 	
 	// Instructions and Legend for colored status icons
 	public static function getInstructions($config) {
-		global $lang, $debug;
+		global $lang, $debug, $surveys_enabled;
 		$html = RCView::table(array('style'=>'width:800px;table-layout:fixed;','cellspacing'=>'0'),
 					RCView::tr('',
 						RCView::td(array('style'=>'padding:10px 30px 10px 0;','valign'=>'top'),
@@ -1257,7 +1281,7 @@ $debug['step4'] = "Before return formsEvents took in $lap_duration seconds.";
 										) .
 										RCView::td(array('class'=>'nowrap', 'style'=>''),
 											(!$surveys_enabled ? "" :
-												RCView::img(array('src'=>'tick_circle_frame.png','class'=>'imgfix')) . $lang['global_94']
+												RCView::img(array('src'=>'circle_green_tick.png','class'=>'imgfix')) . $lang['global_94']
 											)
 										)
 									)
