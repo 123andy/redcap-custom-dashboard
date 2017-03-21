@@ -255,7 +255,8 @@ function testFilter() {
 /* 
 	SECTION FOR FANCY EXCLUDE DIV FEATURES
 
-	This whole part of the UI should probably be changed... I tried to reuse some existing REDCap stuff but there is a lot of overhead here that is probably unnecessary...
+	This whole part of the UI should probably be changed... I tried to reuse some existing REDCap stuff
+	but there is a lot of overhead here that is probably unnecessary...
 
 */
 

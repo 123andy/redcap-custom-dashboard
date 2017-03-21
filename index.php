@@ -39,7 +39,7 @@ $config = array(
 	'num_per_page' => 25,
 	'pagenum' => 1,
 	'group_by' => REDCap::isLongitudinal() ? 'event' : 'form',	//form or event
-	'vertical_header' => 0,	// default to horizontal	
+	'vertical_header' => 1,	// default to horizontal
 	'excluded_forms' => '',
 	'excluded_events' => '',
     'order_by' => ''
@@ -928,8 +928,20 @@ $debug['step2'] = "getting labels and survey responses took in $lap_duration sec
 $lap_duration = round(microtime(true) - $last_lap_ts,2);
 $last_lap_ts = microtime(true);
 $debug['filter_formsEvents'] = "Calculating formsEvents took in $lap_duration seconds.";		
-		
-		
+
+        $recordLockSigStatus = self::getLockAndEsignedStatus($project_id, $formStatusValues);
+        $debug['formStatusValues'] = print_r($formStatusValues,true);
+        $debug['locksigstatus'] = print_r($recordLockSigStatus,true);
+		// Look to see if there are some locked and/or esigned records
+		$results = self::getLockAndEsignedStatus($project_id, $formStatusValues);
+		$displayLocking = $results[0];
+		$locked_records = $results[1];
+		$displayEsignature = $results[2];
+		$esigned_records = $results[3];
+
+        $lockimg_display = count($locked_records) == 0 ? false : true;
+        $esigimg_display = count($esigned_records) == 0 ? false : true;
+
 		// Start building the table with the Header rows
 		$rows = self::buildHeaderRows($formsEvents, $config);
 		
@@ -1002,9 +1014,9 @@ $debug['filter_formsEvents'] = "Calculating formsEvents took in $lap_duration se
 							);
 			}
 			// Loop through each column
-			$lockimgStatic  = RCView::img(array('class'=>'lock', 'style'=>'display:none;', 'src'=>'lock_small.png'));
-			$esignimgStatic = RCView::img(array('class'=>'esign', 'style'=>'display:none;', 'src'=>'tick_shield_small.png'));
-			foreach ($formsEvents as $attr) 
+			$lockimgStatic  = RCView::img(array('class'=>'lock', 'style'=>'display:inline-block;', 'src'=>'lock_small.png'));
+			$esignimgStatic = RCView::img(array('class'=>'esign', 'style'=>'display:inline-block;', 'src'=>'tick_shield_small.png'));
+			foreach ($formsEvents as $attr)
 			{
 				// If it's a survey response, display different icons
 				if (isset($surveyResponses[$this_record][$attr['event_id']][$attr['form_name']])) {			
@@ -1028,9 +1040,25 @@ $debug['filter_formsEvents'] = "Calculating formsEvents took in $lap_duration se
 						$img = 'circle_gray.png';
 					}
 				}
+
 				// If locked and/or e-signed, add icon
-				$lockimg = (isset($locked_records[$this_record][$attr['event_id']][$attr['form_name']])) ? $lockimgStatic : "";
-				$esignimg = (isset($esigned_records[$this_record][$attr['event_id']][$attr['form_name']])) ? $esignimgStatic : "";
+                if ($lockimg_display AND $recordLockSigStatus[0] == '1') {
+                    $lockimg = $recordLockSigStatus[1][$this_record][$attr['event_id']][$attr['form_name']] == '1' ? $lockimgStatic : "<span style='margin-right:14px'></span>";
+                } else {
+                    $lockimg = "";
+                }
+                // If locked and/or e-signed, add icon
+                if ($esigimg_display AND $recordLockSigStatus[2] == '1') {
+                    $esignimg = $recordLockSigStatus[1][$this_record][$attr['event_id']][$attr['form_name']] == '1' ? $esignimgStatic : "<span style='margin-right:12px'></span>";
+                } else {
+                    $esignimg = "";
+                }
+
+
+
+                //                $lockimg = $recordLockSigStatus[0] == '1' && $recordLockSigStatus[1][$this_record][$attr['event_id']][$attr['form_name']] == '1' ? $lockimgStatic : "";
+//				$lockimg = (isset($locked_records[$this_record][$attr['event_id']][$attr['form_name']])) ? $lockimgStatic : "";
+//				$esignimg = (isset($esigned_records[$this_record][$attr['event_id']][$attr['form_name']])) ? $esignimgStatic : "";
 				// Add cell
 				$td = 	RCView::a(array(
 					'href'=>APP_PATH_WEBROOT."DataEntry/index.php?pid=$project_id&id=".removeDDEending($this_record)."&page={$attr['form_name']}&event_id={$attr['event_id']}"),
@@ -1052,43 +1080,61 @@ $debug['step4'] = "Before return formsEvents took in $lap_duration seconds.";
 		// . $pageNumDropdown;
 		return $html;
 	}
-	
-	// Options to view locking and/or esignature status
-	public static function getLockingAndEsignature($displayLocking, $displayEsignature) {
-		global $lang;
-		$html = (!($displayLocking || $displayEsignature) ? '' : 
-			RCView::div(array('style'=>'margin-bottom:10px;color:#888;'),
-				RCView::span(array('style'=>'font-weight:bold;margin-right:10px;color:#000;'), $lang['data_entry_225']) .
-				// Instrument status only
-				RCView::a(array('href'=>'javascript:;', 'class'=>'statuslink_selected', 'onclick'=>"changeLinkStatus(this);$('.esign').hide();$('.lock').hide();$('.fstatus').show();"), 
-					 $lang['data_entry_226']) .	
-				// Lock only
-				(!$displayLocking ? '' : 
-					RCView::SP . " | " . RCView::SP .
-					RCView::a(array('href'=>'javascript:;', 'class'=>'statuslink_unselected', 'onclick'=>"changeLinkStatus(this);$('.fstatus').hide();$('.esign').hide();$('.lock').show();"), 
-						 $lang['data_entry_227'])
-					) .	
-				// Esign only
-				(!$displayEsignature ? '' : 
-					RCView::SP . " | " . RCView::SP .		
-					RCView::a(array('href'=>'javascript:;', 'class'=>'statuslink_unselected', 'onclick'=>"changeLinkStatus(this);$('.fstatus').hide();$('.lock').hide();$('.esign').show();"), 
-						 $lang['data_entry_228'])
-				) .	
-				// Esign + Locking
-				(!($displayLocking && $displayEsignature) ? '' : 
-					RCView::SP . " | " . RCView::SP .		
-					RCView::a(array('href'=>'javascript:;', 'class'=>'statuslink_unselected', 'onclick'=>"changeLinkStatus(this);$('.fstatus').hide();$('.lock').show();$('.esign').show();"), 
-						 $lang['data_entry_230'])
-				) .	
-				// All types
-				RCView::SP . " | " . RCView::SP .		
-				RCView::a(array('href'=>'javascript:;', 'class'=>'statuslink_unselected', 'onclick'=>"changeLinkStatus(this);$('.fstatus').show();$('.lock').show();$('.esign').show();"), 
-					 $lang['data_entry_229'])
-			)
-		);
-		return $html;
+
+
+	// Retrieve the locking and/or esignature status for each form
+	public static function getLockAndEsignedStatus($project_id,$formStatusValues) {
+		global $Proj, $debug;
+
+		## LOCKING & E-SIGNATURES
+		$displayLocking = $displayEsignature = false;
+        $locked_records = $esigned_records = array();
+
+		// Check if need to display this info at all
+		$sql = "select display, display_esignature from redcap_locking_labels 
+                	where project_id = $project_id and form_name in (".prep_implode(array_keys($Proj->forms)).")";
+		$q = db_query($sql);
+		if (db_num_rows($q) == 0) {
+        		$displayLocking = true;
+		} else {
+        		$lockFormCount = count($Proj->forms);
+        		$esignFormCount = 0;
+        		while ($row = db_fetch_assoc($q)) {
+                		if ($row['display'] == '0') $lockFormCount--;
+                		if ($row['display_esignature'] == '1') $esignFormCount++;
+        		}
+        		if ($esignFormCount > 0) {
+                		$displayLocking = $displayEsignature = true;
+        		} elseif ($lockFormCount > 0) {
+                		$displayLocking = true;
+        		}
+		}
+
+		// Get all locked records and put into an array
+		if ($displayLocking) {
+    			$sql = "select record, event_id, form_name from redcap_locking_data 
+                        	where project_id = $project_id and record in (".prep_implode(array_keys($formStatusValues)).")";
+#			$debug['In display locking'] = $sql;
+        		$q = db_query($sql);
+        		while ($row = db_fetch_assoc($q)) {
+                		$locked_records[$row['record']][$row['event_id']][$row['form_name']] = true;
+        		}
+		}
+
+		// Get all e-signed records and put into an array
+		if ($displayEsignature) {
+        		$sql = "select record, event_id, form_name from redcap_esignatures
+                        	where project_id = $project_id and record in (".prep_implode(array_keys($formStatusValues)).")";
+ #   			$debug['In esign'] = $sql;
+	    		$q = db_query($sql);
+        		while ($row = db_fetch_assoc($q)) {
+                		$esigned_records[$row['record']][$row['event_id']][$row['form_name']] = true;
+        		}
+		}
+
+		return array($displayLocking, $locked_records, $displayEsignature, $esigned_records);
 	}
-		
+
 	// Recursive function to add colspan tag to to array based on repeating instances of the term key in the array
 	public static function addColSpan($arr, $term = 'form_name') {
 		$curAttr = array_shift($arr);	// Take off top array entry
